@@ -1,0 +1,141 @@
+# app/services/agent_services.py
+import os
+import json
+from crewai import Agent, Task, Crew, LLM
+from app.services.pdf_reader import read_pdf_text
+from app.services.ucp_loader import load_ucp_db_from_dir
+from typing import List, Dict, Any
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+
+def run_lc_extractor(lc_text: str):
+    extractor = Agent(
+        role="LC Extractor",
+        goal="Extract key fields from a Letter of Credit (LC) document",
+        backstory="You are an expert in trade finance documents and extract only structured fields.",
+        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        allow_delegation=False,
+        verbose=False,
+    )
+    task = Task(
+        description=f"""
+Extract the most important fields from the following Letter of Credit (LC) document and return ONLY a valid JSON object.
+
+Document:
+{lc_text}
+""",
+        expected_output="Valid JSON object with LC details.",
+        agent=extractor,
+    )
+    crew = Crew(agents=[extractor], tasks=[task], verbose=False)
+    result = crew.kickoff()
+    try:
+        return json.loads(str(result).strip())
+    except Exception:
+        return {"raw_output": str(result)}
+
+def run_doc_extractor(doc_text: str):
+    extractor = Agent(
+        role="Document Extractor",
+        goal="Extract key structured fields from PDF documents",
+        backstory="You are an expert in trade finance and logistics documents.",
+        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        allow_delegation=False,
+        verbose=False,
+    )
+    task = Task(
+        description=f"Extract fields from the following document. Return only a valid JSON object.\n\n{doc_text}",
+        expected_output="Valid JSON object with extracted fields.",
+        agent=extractor,
+    )
+    crew = Crew(agents=[extractor], tasks=[task], verbose=False)
+    result = crew.kickoff()
+    try:
+        return json.loads(str(result).strip())
+    except Exception:
+        return {"raw_output": str(result)}
+
+def run_discrepancy_check(lc_data: Dict[str, Any], doc_results: List[Dict[str, Any]]):
+    checker = Agent(
+        role="Discrepancy Checker",
+        goal="Compare LC document with supporting documents and flag matches, mismatches, or interchanges.",
+        backstory="You are an expert trade finance compliance officer.",
+        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        allow_delegation=False,
+        verbose=False,
+    )
+    tables = []
+    for doc in doc_results:
+        comparison_instructions = f"""
+Compare LC data against supporting document: {doc.get('file_name','doc')}
+
+LC Data: {json.dumps(lc_data)}
+Document Data: {json.dumps(doc.get('data', {}))}
+
+Return a JSON array rows:
+[{{"Field":"...","LC Value":"...","Document Value":"...","Status":"..."}}, ...]
+"""
+        task = Task(description=comparison_instructions, expected_output="JSON array", agent=checker)
+        crew = Crew(agents=[checker], tasks=[task], verbose=False)
+        result = crew.kickoff()
+        try:
+            rows = json.loads(str(result).strip())
+        except Exception:
+            # fallback rule-based comparison
+            rows = []
+            doc_data = doc.get("data", {})
+            for field, lc_value in lc_data.items():
+                doc_value = doc_data.get(field, "")
+                status = "❌ Mismatch"
+                if not lc_value or not doc_value:
+                    status = "⚠️ Missing"
+                elif str(lc_value).strip().lower() == str(doc_value).strip().lower():
+                    status = "✅ Match"
+                rows.append({"Field": field, "LC Value": lc_value, "Document Value": doc_value, "Status": status})
+        tables.append({"file": doc.get("file_name", "Document"), "table": rows})
+    return tables
+
+def run_compliance_check(lc_data: Dict, discrepancy_tables: List, ucp_persist_dir: str, lc_file_path: str, supporting_file_paths: List[str]):
+    # load ucp vector db if present
+    ucp_context = ""
+    try:
+        if ucp_persist_dir and os.path.exists(ucp_persist_dir):
+            ucp_db = load_ucp_db_from_dir(ucp_persist_dir)
+            retrieved = ucp_db.similarity_search(json.dumps(lc_data), k=3)
+            ucp_context = "\n\n".join([doc.page_content for doc in retrieved])
+    except Exception:
+        ucp_context = ""
+
+    llm_obj = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY)
+
+    compliance_agent = Agent(
+        role="Compliance Officer",
+        goal="Ensure a trade finance transaction is fully compliant with UCP 600 regulations.",
+        backstory="You are a compliance expert reviewing trade finance transactions against UCP 600 rules.",
+        llm=llm_obj,
+        tools=[],
+        allow_delegation=False,
+        verbose=False,
+    )
+
+    task_text = f"""
+Review LC details and discrepancy tables. Relevant UCP context:
+{ucp_context}
+
+LC Data:
+{json.dumps(lc_data)}
+
+Discrepancy tables: {json.dumps(discrepancy_tables)}
+
+Return a JSON object with:
+{{"overall_status":"Accepted" | "Rejected", "ucp compliance issues":[...], "recommendation":"string"}}
+"""
+    task = Task(description=task_text, expected_output="JSON object", agent=compliance_agent)
+    crew = Crew(agents=[compliance_agent], tasks=[task], verbose=False)
+    result = crew.kickoff()
+    try:
+        parsed = json.loads(str(result).strip())
+    except Exception:
+        parsed = {"raw_output": str(result)}
+    # Move/copy files if accepted (caller can handle)
+    return parsed
