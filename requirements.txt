@@ -18,3 +18,4 @@ PyPDF2
 pandas
 python-dotenv
 pypdf
+argon2_cffi
