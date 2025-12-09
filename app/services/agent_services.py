@@ -13,7 +13,7 @@ def run_lc_extractor(lc_text: str):
         role="LC Extractor",
         goal="Extract key fields from a Letter of Credit (LC) document",
         backstory="You are an expert in trade finance documents and extract only structured fields.",
-        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        llm=LLM(model="groq/meta-llama/llama-guard-4-12b", temperature=0.1, api_key=GROQ_API_KEY),
         allow_delegation=False,
         verbose=False,
     )
@@ -39,7 +39,7 @@ def run_doc_extractor(doc_text: str):
         role="Document Extractor",
         goal="Extract key structured fields from PDF documents",
         backstory="You are an expert in trade finance and logistics documents.",
-        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        llm=LLM(model="groq/meta-llama/llama-guard-4-12b", temperature=0.1, api_key=GROQ_API_KEY),
         allow_delegation=False,
         verbose=False,
     )
@@ -60,7 +60,7 @@ def run_discrepancy_check(lc_data: Dict[str, Any], doc_results: List[Dict[str, A
         role="Discrepancy Checker",
         goal="Compare LC document with supporting documents and flag matches, mismatches, or interchanges.",
         backstory="You are an expert trade finance compliance officer.",
-        llm=LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY),
+        llm=LLM(model="groq/meta-llama/llama-guard-4-12b", temperature=0.1, api_key=GROQ_API_KEY),
         allow_delegation=False,
         verbose=False,
     )
@@ -106,7 +106,7 @@ def run_compliance_check(lc_data: Dict, discrepancy_tables: List, ucp_persist_di
     except Exception:
         ucp_context = ""
 
-    llm_obj = LLM(model="groq/llama-3.3-70b-versatile", temperature=0.1, api_key=GROQ_API_KEY)
+    llm_obj = LLM(model="groq/meta-llama/llama-guard-4-12b", temperature=0.1, api_key=GROQ_API_KEY)
 
     compliance_agent = Agent(
         role="Compliance Officer",

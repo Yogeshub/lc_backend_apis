@@ -38,7 +38,7 @@ async def chat_query(query: str = Form(...), lc_id: int | None = None, ucp_id: i
             lc_context = lc.extracted_json
     # Compose prompt & call crewai agent
     from crewai import Agent, Task, Crew, LLM
-    llm = LLM(model="groq/llama-3.3-70b-versatile", api_key=os.getenv("GROQ_API_KEY"))
+    llm = LLM(model="groq/meta-llama/llama-guard-4-12b", api_key=os.getenv("GROQ_API_KEY"))
     agent = Agent(role="QA Agent", goal="Answer user query using LC / UCP content", llm=llm, allow_delegation=False)
     task_text = f"""
 User question:
